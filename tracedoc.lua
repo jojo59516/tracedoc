@@ -179,6 +179,36 @@ local function doc_change(doc, k, v)
 	end
 end
 
+-- refer to table.insert()
+local function doc_insert(doc, index, v)
+	local len = tracedoc.len(doc)
+	if v == nil then
+		v = index
+		index = len + 1
+	end
+
+	for i = len, index, -1 do
+		doc[i + 1] = doc[i]
+	end
+	doc[index] = v
+end
+
+-- refer to table.remove()
+local function doc_remove(doc, index)
+	local len = tracedoc.len(doc)
+	index = index or len
+
+	local v = doc[index]
+	doc[index] = nil -- trig a clone of doc._lastversion[index] in doc_change()
+
+	for i = index + 1, len do
+		doc[i - 1] = doc[i]
+	end	
+	doc[len] = nil
+
+	return v
+end
+
 local function doc_unpack(doc, start, len)
 	if not tracedoc.check_type(doc) then return table.unpack(doc, start, len) end
 
@@ -200,10 +230,13 @@ local doc_mt = {
 	__metatable = tracedoc_type,	-- avoid copy by ref
 }
 
+tracedoc.next = doc_next
 tracedoc.pairs = doc_pairs
 tracedoc.ipairs = doc_ipairs
 tracedoc.len = doc_len
 tracedoc.unpack = doc_unpack
+tracedoc.insert = doc_insert
+tracedoc.remove = doc_remove
 
 function tracedoc.new(init)
 	local doc = {

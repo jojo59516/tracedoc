@@ -322,4 +322,53 @@ describe("basic tests", function()
         assert.are.equal(concat(list, 1, 5), concat(doc.list, 1, 5))
         assert.are.equal(concat(list, 2, 4), concat(doc.list, 2, 4))
     end)
+
+    test("support for tracedoc.insert() and tracedoc.remove()", function ()
+        local function dump(doc)
+            local data = {}
+            for i, v in tracedoc.ipairs(doc) do                
+                if tracedoc.check_type(v) then
+                    data[i] = dump(v)
+                else
+                    data[i] = v
+                end
+            end
+            return data
+        end
+        
+        local plain_data = {{1}, {2}, {3}, {4}, {5}}
+        local doc = tracedoc.new(plain_data)
+        tracedoc.commit(doc)
+        assert.are.same(plain_data, dump(doc))
+
+        -- push back
+        table.insert(plain_data, {6})
+        tracedoc.insert(doc, {6})
+        assert.is_truthy(doc._dirty)
+        assert.are.same(plain_data, dump(doc))
+        tracedoc.commit(doc)
+
+        -- insert
+        table.insert(plain_data, 3, {7})
+        tracedoc.insert(doc, 3, {7})
+        assert.is_truthy(doc._dirty)
+        assert.are.same(plain_data, dump(doc))
+        tracedoc.commit(doc)
+
+        -- pop back
+        local pv = table.remove(plain_data)
+        local dv = tracedoc.remove(doc)
+        assert.are.same(pv, dump(dv))
+        assert.is_truthy(doc._dirty)
+        assert.are.same(plain_data, dump(doc))
+        tracedoc.commit(doc)
+
+        -- remove
+        pv = table.remove(plain_data, 3)
+        dv = tracedoc.remove(doc, 3)
+        assert.are.same(pv, dump(dv))
+        assert.is_truthy(doc._dirty)
+        assert.are.same(plain_data, dump(doc))
+        tracedoc.commit(doc)
+    end)
 end)
