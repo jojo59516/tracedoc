@@ -1,5 +1,9 @@
 local tracedoc = require("tracedoc")
 
+if jit and type(jit.off) == "function" then
+    jit.off()
+end
+
 describe("basic tests", function()
     local plain_data = {
         hp = 50,
@@ -208,9 +212,9 @@ describe("basic tests", function()
         tracedoc.commit(doc)
         assert.is_falsy(doc._dirty)
 
-        -- assign a same value also makes doc dirty
+        -- assigning a same value does not makes doc dirty
         doc.level = 10
-        assert.is_truthy(doc._dirty)
+        assert.is_falsy(doc._dirty)
 
         doc.hp = 100
         assert.is_truthy(doc._dirty)

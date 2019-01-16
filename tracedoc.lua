@@ -114,7 +114,7 @@ local function doc_read(doc, k)
 	return doc._lastversion[k]
 end
 
-local function doc_change(doc, k, v)
+local function mark_dirty(doc)
 	if not doc._dirty then
 		doc._dirty = true
 		local parent = doc._parent
@@ -126,42 +126,57 @@ local function doc_change(doc, k, v)
 			parent = parent._parent
 		end
 	end
-	if type(v) == "table" then
-		local vt = getmetatable(v)
-		if vt == nil or vt == tracedoc_type then
-			local lv = doc._lastversion[k]
-			if getmetatable(lv) ~= tracedoc_type then
-				-- last version is not a table, new a empty one
-				lv = tracedoc.new()
-				lv._parent = doc
-				doc._lastversion[k] = lv
-			elseif doc[k] == nil then
-				-- this version is clear first, deepcopy lastversion one
-				lv = tracedoc.new(lv)
-				lv._parent = doc
-				doc._lastversion[k] = lv
-			end
-			local keys = {}
-			for k in pairs(lv) do
-				keys[k] = true
-			end
-			-- deepcopy v
-			for k,v in pairs(v) do
-				lv[k] = v
-				keys[k] = nil
-			end
-			-- clear keys not exist in v
-			for k in pairs(keys) do
-				lv[k] = nil
-			end
-			-- don't cache sub table into doc._changes
-			doc._changes[k] = nil
-			doc._keys[k] = nil
-			return
-		end
-	end
+end
+
+local function doc_change_value(doc, k, v)
+	mark_dirty(doc)
 	doc._changes[k] = v
 	doc._keys[k] = true
+end
+
+local function doc_change_recursively(doc, k, v)
+	local lv = doc._lastversion[k]
+	if getmetatable(lv) ~= tracedoc_type then
+		-- last version is not a table, new a empty one
+		lv = tracedoc.new()
+		lv._parent = doc
+		doc._lastversion[k] = lv
+	elseif doc[k] == nil then
+		-- this version is clear first, deepcopy lastversion one
+		lv = tracedoc.new(lv)
+		lv._parent = doc
+		doc._lastversion[k] = lv
+	end
+	local keys = {}
+	for k in pairs(lv) do
+		keys[k] = true
+	end
+	-- deepcopy v
+	for k,v in pairs(v) do
+		lv[k] = v
+		keys[k] = nil
+	end
+	-- clear keys not exist in v
+	for k in pairs(keys) do
+		lv[k] = nil
+	end
+	-- don't cache sub table into doc._changes
+	doc._changes[k] = nil
+	doc._keys[k] = nil
+end
+
+local function doc_change(doc, k, v)
+	local recursively = false
+	if type(v) == "table" then
+		local vt = getmetatable(v)
+		recursively = vt == nil or vt == tracedoc_type
+	end
+
+	if recursively then
+		doc_change_recursively(doc, k, v)
+	elseif doc[k] ~= v then
+		doc_change_value(doc, k, v)
+	end
 end
 
 local function doc_unpack(doc, start, len)
@@ -311,7 +326,9 @@ end
 
 function tracedoc.mark_changed(doc, k)
 	local v = doc[k]
-	doc_change(doc, k, v)
+	assert(not tracedoc.check_type(v), "do not mark a tracedoc as changed!")
+
+	doc_change_value(doc, k, v)
 	doc._force_changed[k] = true
 end
 
