@@ -351,6 +351,11 @@ end
 
 function tracedoc.ignore(doc, enable)
 	rawset(doc, "_ignore", enable)	-- ignore it during commit when enable
+	if not enable then -- when disable ignore, we need remark dirty for doc's parents if needed
+		if doc._dirty and doc._parent then
+			mark_dirty(doc._parent)
+		end
+	end
 end
 
 function tracedoc.opaque(doc, enable)
