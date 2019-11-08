@@ -16,102 +16,29 @@ tracedoc.null = NULL
 local tracedoc_type = setmetatable({}, { __tostring = function() return "TRACEDOC" end })
 local tracedoc_len = setmetatable({} , { __mode = "kv" })
 
-local function doc_next(doc, key)
-	-- at first, iterate all the keys changed
-	local change_keys = doc._keys
-	if key == nil or change_keys[key] then
-		while true do
-			key = next(change_keys, key)
-			if key == nil then
-				break
-			end
-			local v = doc[key]
-			if v ~= nil then
-				return key, v
-			end
-		end
-	end
 
-	-- and then, iterate all the keys in lastversion except keys changed
+local function doc_len(doc)
+	return #doc._stage
+end
 
-	local lastversion = doc._lastversion
-
-	while true do
-		key = next(lastversion, key)
-		if key == nil then
-			return
-		end
-		if not change_keys[key] then
-			local v = doc[key]
-			if v ~= nil then
-				return key, v
-			end
-		end
-	end
+local function doc_next(doc, k)
+	return next(doc._stage, k)
 end
 
 local function doc_pairs(doc)
-	return doc_next, doc
+	return pairs(doc._stage)
 end
 
 local function doc_ipairs(doc)
-	local function iter(doc, var)
-		var = var + 1
-		local val = doc[var]
-		if val ~= nil then
-		   return var, val
-		end
-	end
-	return iter, doc, 0
+	return ipairs(doc._stage)
 end
 
-local function find_length_after(doc, idx)
-	local v = doc[idx + 1]
-	if v == nil then
-		return idx
-	end
-	repeat
-		idx = idx + 1
-		v = doc[idx + 1]
-	until v == nil
-	tracedoc_len[doc] = idx
-	return idx
+local function doc_unpack(doc, i, j)
+	return table.unpack(doc._stage, i, j)
 end
 
-local function find_length_before(doc, idx)
-	if idx <= 1 then
-		tracedoc_len[doc] = nil
-		return 0
-	end
-	repeat
-		idx = idx - 1
-	until idx <=0 or doc[idx] ~= nil
-	tracedoc_len[doc] = idx
-	return idx
-end
-
-local function doc_len(doc)
-	local len = tracedoc_len[doc]
-	if len == nil then
-		len = table_len(doc._lastversion)
-		tracedoc_len[doc] = len
-	end
-	if len == 0 then
-		return find_length_after(doc, 0)
-	end
-	local v = doc[len]
-	if v == nil then
-		return find_length_before(doc, len)
-	end
-	return find_length_after(doc, len)
-end
-
-local function doc_read(doc, k)
-	if doc._keys[k] then
-		return doc._changes[k]
-	end
-	-- if k is not changed, return lastversion
-	return doc._lastversion[k]
+local function doc_concat(doc, sep, i, j)
+	return table.concat(doc._stage, sep, i, j)
 end
 
 local function mark_dirty(doc)
@@ -130,24 +57,28 @@ end
 
 local function doc_change_value(doc, k, v, force)
 	if v ~= doc[k] or force then
-		doc._changes[k] = v
-		doc._keys[k] = true
+		doc._changed_keys[k] = true -- mark changed (even nil)
+		doc._changed_values[k] = doc._stage[k] -- lastversion value
+		doc._stage[k] = v -- current value
 		mark_dirty(doc)
 	end
 end
 
 local function doc_change_recursively(doc, k, v)
-	local lv = doc._lastversion[k]
+	local lv = doc._stage[k]
 	if getmetatable(lv) ~= tracedoc_type then
-		-- last version is not a table, new a empty one
-		lv = tracedoc.new()
-		lv._parent = doc
-		doc._lastversion[k] = lv
-	elseif doc[k] == nil then
-		-- this version is clear first, deepcopy lastversion one
-		lv = tracedoc.new(lv)
-		lv._parent = doc
-		doc._lastversion[k] = lv
+		lv = doc._changed_values[k]
+		if getmetatable(lv) ~= tracedoc_type then
+			-- last version is not a table, new a empty one
+			lv = tracedoc.new()
+			lv._parent = doc
+			doc._stage[k] = lv
+		else
+			-- this version is clear first (not a tracedoc), deepcopy lastversion one
+			lv = tracedoc.new(lv)
+			lv._parent = doc
+			doc._stage[k] = lv
+		end
 	end
 	local keys = {}
 	for k in pairs(lv) do
@@ -162,9 +93,9 @@ local function doc_change_recursively(doc, k, v)
 	for k in pairs(keys) do
 		lv[k] = nil
 	end
-	-- don't cache sub table into doc._changes
-	doc._changes[k] = nil
-	doc._keys[k] = nil
+	-- don't cache sub table into changed fields
+	doc._changed_values[k] = nil
+	doc._changed_keys[k] = nil
 end
 
 local function doc_change(doc, k, v)
@@ -223,32 +154,33 @@ local function doc_unpack(doc, start, len)
 	return table.unpack(t, 1, len - start + 1)
 end
 
-local doc_mt = {
-	__newindex = doc_change,
-	__index = doc_read,
-	__pairs = doc_pairs,
-	__ipairs = doc_ipairs,
-	__len = doc_len,
-	__metatable = tracedoc_type,	-- avoid copy by ref
-}
-
+tracedoc.len = doc_len
 tracedoc.next = doc_next
 tracedoc.pairs = doc_pairs
 tracedoc.ipairs = doc_ipairs
-tracedoc.len = doc_len
 tracedoc.unpack = doc_unpack
+tracedoc.concat = doc_concat
 tracedoc.insert = doc_insert
 tracedoc.remove = doc_remove
 
 function tracedoc.new(init)
+	local doc_stage = {}
 	local doc = {
 		_dirty = false,
 		_parent = false,
-		_changes = {},
-		_keys = {},
-		_lastversion = {},
+		_changed_keys = {},
+		_changed_values = {},
+		_stage = doc_stage,
+		_force_changed = {},
 	}
-	setmetatable(doc, doc_mt)
+	setmetatable(doc, {
+		__index = doc_stage, 
+		__newindex = doc_change,
+		__pairs = doc_pairs,
+		__ipairs = doc_ipairs,
+		__len = doc_len,
+		__metatable = tracedoc_type,	-- avoid copy by ref
+	})
 	if init then
 		for k,v in pairs(init) do
 			-- deepcopy v
@@ -263,19 +195,15 @@ function tracedoc.new(init)
 end
 
 function tracedoc.dump(doc)
-	local last = {}
-	for k,v in pairs(doc._lastversion) do
-		table.insert(last, string.format("%s:%s",k,v))
+	local stage = {}
+	for k,v in pairs(doc._stage) do
+		table.insert(stage, string.format("%s:%s",k,v))
 	end
-	local changes = {}
-	for k,v in pairs(doc._changes) do
-		table.insert(changes, string.format("%s:%s",k,v))
+	local changed = {}
+	for k in pairs(doc._changed_keys) do
+		table.insert(changed, string.format("%s:%s",k,doc._changed_values[k]))
 	end
-	local keys = {}
-	for k in pairs(doc._keys) do
-		table.insert(keys, k)
-	end
-	return string.format("last [%s]\nchanges [%s]\nkeys [%s]",table.concat(last, " "), table.concat(changes," "), table.concat(keys," "))
+	return string.format("content [%s]\nchanges [%s]",table.concat(stage, " "), table.concat(changed," "))
 end
 
 local function _commit(is_keep_dirty, doc, result, prefix)
@@ -285,29 +213,26 @@ local function _commit(is_keep_dirty, doc, result, prefix)
 	if not is_keep_dirty then
 		doc._dirty = false
 	end
-	local lastversion = doc._lastversion
-	local changes = doc._changes
-	local keys = doc._keys
+	local changed_keys = doc._changed_keys
+	local changed_values = doc._changed_values
+	local stage = doc._stage
 	local dirty = false
-	if next(keys) ~= nil then
+	if next(changed_keys) ~= nil then
 		dirty = true
-		for k in next, keys do
-			local v = changes[k]
+		for k in next, changed_keys do
+			local v, lv = stage[k], changed_values[k]
 			if not is_keep_dirty then
-				keys[k] = nil
-				changes[k] = nil
+				changed_keys[k] = nil
+				changed_values[k] = nil
 			end
 			if result then
 				local key = prefix and prefix .. k or tostring(k)
 				result[key] = v == nil and NULL or v
 				result._n = (result._n or 0) + 1
 			end
-			if not is_keep_dirty then
-				lastversion[k] = v
-			end
 		end
 	end
-	for k,v in pairs(lastversion) do
+	for k, v in pairs(stage) do
 		if getmetatable(v) == tracedoc_type and v._dirty then
 			if result then
 				local key = prefix and prefix .. k or tostring(k)
