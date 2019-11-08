@@ -142,18 +142,6 @@ local function doc_remove(doc, index)
 	return v
 end
 
-local function doc_unpack(doc, start, len)
-	if not tracedoc.check_type(doc) then return table.unpack(doc, start, len) end
-
-	start = start or 1
-	len = len or tracedoc.len(doc)
-	local t = {}
-	for i = start, len do
-		t[i - start + 1] = doc[i]
-	end
-	return table.unpack(t, 1, len - start + 1)
-end
-
 tracedoc.len = doc_len
 tracedoc.next = doc_next
 tracedoc.pairs = doc_pairs
