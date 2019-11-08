@@ -128,10 +128,12 @@ local function mark_dirty(doc)
 	end
 end
 
-local function doc_change_value(doc, k, v)
-	mark_dirty(doc)
-	doc._changes[k] = v
-	doc._keys[k] = true
+local function doc_change_value(doc, k, v, force)
+	if v ~= doc[k] or force then
+		doc._changes[k] = v
+		doc._keys[k] = true
+		mark_dirty(doc)
+	end
 end
 
 local function doc_change_recursively(doc, k, v)
@@ -243,7 +245,6 @@ function tracedoc.new(init)
 		_dirty = false,
 		_parent = false,
 		_changes = {},
-		_force_changed = {},
 		_keys = {},
 		_lastversion = {},
 	}
@@ -286,28 +287,23 @@ local function _commit(is_keep_dirty, doc, result, prefix)
 	end
 	local lastversion = doc._lastversion
 	local changes = doc._changes
-	local force_changed = doc._force_changed
 	local keys = doc._keys
 	local dirty = false
 	if next(keys) ~= nil then
+		dirty = true
 		for k in next, keys do
 			local v = changes[k]
-			local is_force_change = force_changed[k]
 			if not is_keep_dirty then
 				keys[k] = nil
 				changes[k] = nil
-				force_changed[k] = nil
 			end
-			if lastversion[k] ~= v or is_force_change then
-				dirty = true
-				if result then
-					local key = prefix and prefix .. k or tostring(k)
-					result[key] = v == nil and NULL or v
-					result._n = (result._n or 0) + 1
-				end
-				if not is_keep_dirty then
-					lastversion[k] = v
-				end
+			if result then
+				local key = prefix and prefix .. k or tostring(k)
+				result[key] = v == nil and NULL or v
+				result._n = (result._n or 0) + 1
+			end
+			if not is_keep_dirty then
+				lastversion[k] = v
 			end
 		end
 	end
@@ -366,8 +362,7 @@ function tracedoc.mark_changed(doc, k)
 	local v = doc[k]
 	assert(not tracedoc.check_type(v), "do not mark a tracedoc as changed!")
 
-	doc_change_value(doc, k, v)
-	doc._force_changed[k] = true
+	doc_change_value(doc, k, v, true)
 end
 
 ----- change set
