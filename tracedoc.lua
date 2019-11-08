@@ -171,7 +171,6 @@ function tracedoc.new(init)
 		_changed_keys = {},
 		_changed_values = {},
 		_stage = doc_stage,
-		_force_changed = {},
 	}
 	setmetatable(doc, {
 		__index = doc_stage, 
