@@ -68,21 +68,18 @@ describe("changeset tests", function()
     test("test mapchange/mapupdate", function()
         local mapping = tracedoc.changeset {
             {
-                "LEVEL",
                 create_spy("level", function(doc, level)
                     _print("level = " .. level)
                 end),
                 "level",
             },
             {
-                "HP",
                 create_spy("hp", function(doc, hp)
                     _print("hp = " .. hp)
                 end),
                 "hp",
             },
             {
-                "HP_MAX",
                 create_spy("hp_max", function(doc, hp_max, buff)
                     local hp_max_modify = buff and buff.hp_max_modify or 0
                     hp_max_modify = hp_max_modify or 0
@@ -92,14 +89,12 @@ describe("changeset tests", function()
                 "buff",
             },
             {
-                "ITEM",
                 create_spy("item", function(doc, items)
                     _print("items count = " .. tracedoc.len(items))
                 end),
                 "items",
             },
             {
-                "NAME",
                 create_spy("name", function(doc, name, title)
                     local full_name = name
                     if title and #title > 0 then
@@ -111,27 +106,23 @@ describe("changeset tests", function()
                 "title",
             },
             {
-                -- no tag
                 create_spy("no_tag", function(doc, hp)
                 end),
                 "hp",
             },
             {
-                "-1",
                 create_spy(-1, function (doc, name)
                     _print("name = " .. name)
                 end),
                 "[-1].name",
             }, 
             {
-                "1",
                 create_spy(1, function (doc, name)
                     _print("name = " .. name)
                 end),
                 "[1].name",
             }, 
             {
-                "ARRAY",
                 create_spy("array", function (doc, array)
                     local str = {}
                     for i, v in tracedoc.ipairs(array) do
@@ -143,7 +134,6 @@ describe("changeset tests", function()
                 "array",
             }, 
             {
-                "numbers",
                 create_spy("numbers", function(doc, name1, name_1)
                     _print("doc[1].name = "..name1..", doc[-1].name = "..name_1)
                 end),
@@ -152,7 +142,7 @@ describe("changeset tests", function()
             },
         }
 
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies.level).was_called_with(doc, plain_data.level)
         assert.spy(spies.hp).was_called_with(doc, plain_data.hp)
         assert.spy(spies.hp_max).was_called_with(doc, plain_data.hp_max, nil)
@@ -165,14 +155,14 @@ describe("changeset tests", function()
         reset_spies()
 
         doc.array[4] = 4
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies.array).was.called()
         assert.are.same(trim_lines([[array = 1, 2, 3, 4]]), get_print_content())
         clear_print_buf()
         reset_spies()
 
         doc.hp = doc.hp + 10
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies.hp).was_called_with(doc, plain_data.hp + 10)
         assert.are.same(get_print_content(), trim_lines(
             [[hp = 110]]))
@@ -180,7 +170,7 @@ describe("changeset tests", function()
         reset_spies()
 
         doc.title = "Super Man"
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies.name).was_called_with(doc, plain_data.name, "Super Man")
         assert.are.same(get_print_content(), trim_lines(
             [[name = Player - Super Man]]))
@@ -188,7 +178,7 @@ describe("changeset tests", function()
         reset_spies()
 
         doc.items = {1, 2, 3}
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies.item).was_called()
         assert.are.same(get_print_content(), trim_lines(
             [[items count = 3]]))
@@ -196,24 +186,10 @@ describe("changeset tests", function()
         reset_spies()
 
         doc.buff = { hp_max_modify = 100}
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies.hp_max).was_called()
         assert.are.same(get_print_content(), trim_lines(
             [[hp_max = 200]]))
-        clear_print_buf()
-        reset_spies()
-
-        -- filter LEVEL tag
-        tracedoc.mapupdate(doc, mapping, "LEVEL")
-        assert.spy(spies.level).was_called()
-        assert.are.same(get_print_content(), trim_lines(
-            [[level = 10]]))
-        clear_print_buf()
-        reset_spies()
-
-        -- filter no tag
-        tracedoc.mapupdate(doc, mapping, "")
-        assert.spy(spies.no_tag).was_called()
         clear_print_buf()
         reset_spies()
 
@@ -228,7 +204,6 @@ describe("changeset tests", function()
     test("support for reading a non-exist field", function()
         local mapping = tracedoc.changeset {
             {
-                "HP_MAX",
                 create_spy("hp_max", function(doc, hp_max, hp_max_modify)
                     hp_max_modify = hp_max_modify or 0
                     _print("hp_max = " .. hp_max + hp_max_modify)
@@ -238,7 +213,7 @@ describe("changeset tests", function()
             },
         }
 
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies.hp_max).was_called()
         assert.are.same(get_print_content(), trim_lines(
             [[hp_max = 100]]))
@@ -246,47 +221,10 @@ describe("changeset tests", function()
         reset_spies()
 
         doc.buff = { hp_max_modify = 100 }  -- buff.hp_max_modify added
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies.hp_max).was_called()
         assert.are.same(get_print_content(), trim_lines(
             [[hp_max = 200]]))
-        clear_print_buf()
-        reset_spies()
-    end)
-
-    test("support for apply changes to multiple changesets", function()
-        local mapping1 = tracedoc.changeset {
-            {
-                "HP",
-                create_spy("hp1", function(doc, hp)
-                    _print("mapping1: hp = " .. hp)
-                end),
-                "hp",
-            },
-        }
-
-        local mapping2 = tracedoc.changeset {
-            {
-                "HP",
-                create_spy("hp2", function(doc, hp)
-                    _print("mapping2: hp = " .. hp)
-                end),
-                "hp",
-            },
-        }
-
-        local changes = tracedoc.commit(doc, {})
-        tracedoc.mapchange_without_commit(doc, mapping1, changes)
-        assert.spy(spies.hp1).was_called()
-        assert.are.same(get_print_content(), trim_lines(
-            [[mapping1: hp = 100]]))
-        clear_print_buf()
-        reset_spies()
-
-        tracedoc.mapchange_without_commit(doc, mapping2, changes)
-        assert.spy(spies.hp2).was_called()
-        assert.are.same(get_print_content(), trim_lines(
-            [[mapping2: hp = 100]]))
         clear_print_buf()
         reset_spies()
     end)
@@ -298,7 +236,7 @@ describe("changeset tests", function()
             { create_spy("issue#4", function(doc, d, e) _print("changed") end), "d", "e" }
         }
         doc.d = false
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies["issue#4"]).was_called()
     end)
 
@@ -308,20 +246,18 @@ describe("changeset tests", function()
         local mapping = tracedoc.changeset {
             { create_spy("assign_false", function(doc, d, e) _print("changed") end), "is_dead" }
         }
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies["assign_false"]).was_called()
     end)
 
     test("support for mapchange on root tracedoc", function()
         local mapping = tracedoc.changeset {
             {
-                "ROOT",
                 create_spy("root1", function(root)
                     assert.are.equals(root, doc)
                 end),
             },
             {
-                "OTHER",
                 create_spy("root2", function(root)
                     assert.are.equals(root, doc)
                 end),
@@ -333,28 +269,26 @@ describe("changeset tests", function()
             },
         }
 
-        tracedoc.mapchange(doc, mapping)
+        tracedoc.mapchange(doc, mapping, tracedoc.commit(doc, {}))
         assert.spy(spies["root1"]).was_called()
         assert.spy(spies["root2"]).was_called()
         assert.spy(spies["root3"]).was_called()
         reset_spies()
 
-        tracedoc.mapupdate(doc, mapping, "ROOT")
+        tracedoc.mapupdate(doc, mapping)
         assert.spy(spies["root1"]).was_called()
-        assert.spy(spies["root2"]).was_not_called()
-        assert.spy(spies["root3"]).was_not_called()
+        assert.spy(spies["root2"]).was_called()
+        assert.spy(spies["root3"]).was_called()
     end)
 
     test("mapupdate support for non-tracedoc table", function()
         local mapping = tracedoc.changeset {
             {
-                "LEVEL",
                 create_spy("level", function(doc, level)
                 end),
                 "level",
             },
             {
-                "HP",
                 create_spy("hp", function(doc, hp)
                 end),
                 "hp",

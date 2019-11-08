@@ -4,18 +4,21 @@ local getmetatable = getmetatable
 local type = type
 local rawset = rawset
 local table = table
+local unpack = unpack
+local tostring = tostring
+local assert = assert
 local compat = require("compat")
 local pairs = compat.pairs
 local ipairs = compat.ipairs
 local table_len = compat.len
 local load = compat.load
 
+---@class tracedoc
 local tracedoc = {}
 local NULL = setmetatable({} , { __tostring = function() return "NULL" end })	-- nil
 tracedoc.null = NULL
 local tracedoc_type = setmetatable({}, { __tostring = function() return "TRACEDOC" end })
 local tracedoc_len = setmetatable({} , { __mode = "kv" })
-
 
 local function doc_len(doc)
 	return #doc._stage
@@ -105,14 +108,15 @@ local function doc_change(doc, k, v)
 		recursively = vt == nil or vt == tracedoc_type
 	end
 
-	if recursively then
-		doc_change_recursively(doc, k, v)
-	elseif doc[k] ~= v then
-		doc_change_value(doc, k, v)
+	if v ~= doc[k] then
+		if recursively then
+			doc_change_recursively(doc, k, v)
+		else
+			doc_change_value(doc, k, v)
+		end
 	end
 end
 
--- refer to table.insert()
 local function doc_insert(doc, index, v)
 	local len = tracedoc.len(doc)
 	if v == nil then
@@ -126,13 +130,12 @@ local function doc_insert(doc, index, v)
 	doc[index] = v
 end
 
--- refer to table.remove()
 local function doc_remove(doc, index)
 	local len = tracedoc.len(doc)
 	index = index or len
 
 	local v = doc[index]
-	doc[index] = nil -- trig a clone of doc._lastversion[index] in doc_change()
+	doc[index] = nil -- trig a clone of doc._stage[index] in doc_change()
 
 	for i = index + 1, len do
 		doc[i - 1] = doc[i]
@@ -193,27 +196,26 @@ function tracedoc.dump(doc)
 	return string.format("content [%s]\nchanges [%s]",table.concat(stage, " "), table.concat(changed," "))
 end
 
-local function _commit(is_keep_dirty, doc, result, prefix)
+local function _commit(doc, result, prefix)
 	if doc._ignore then
 		return result
 	end
-	if not is_keep_dirty then
-		doc._dirty = false
-	end
+
+	doc._dirty = false
+
 	local changed_keys = doc._changed_keys
 	local changed_values = doc._changed_values
 	local stage = doc._stage
 	local dirty = false
+	
 	if next(changed_keys) ~= nil then
 		dirty = true
-		for k in next, changed_keys do
+		for k in pairs(changed_keys) do
 			local v, lv = stage[k], changed_values[k]
-			if not is_keep_dirty then
-				changed_keys[k] = nil
-				changed_values[k] = nil
-			end
+			changed_keys[k] = nil
+			changed_values[k] = nil
 			if result then
-				local key = prefix and prefix .. k or tostring(k)
+				local key = prefix and prefix .. "." .. k or tostring(k)
 				result[key] = v == nil and NULL or v
 				result._n = (result._n or 0) + 1
 			end
@@ -222,13 +224,13 @@ local function _commit(is_keep_dirty, doc, result, prefix)
 	for k, v in pairs(stage) do
 		if getmetatable(v) == tracedoc_type and v._dirty then
 			if result then
-				local key = prefix and prefix .. k or tostring(k)
+				local key = prefix and prefix .. "." .. k or tostring(k)
 				local change
 				if v._opaque then
-					change = _commit(is_keep_dirty, v)
+					change = _commit(v)
 				else
 					local n = result._n
-					_commit(is_keep_dirty, v, result, key .. ".")
+					_commit(v, result, key)
 					if n ~= result._n then
 						change = true
 					end
@@ -241,7 +243,7 @@ local function _commit(is_keep_dirty, doc, result, prefix)
 					dirty = true
 				end
 			else
-				local change = _commit(is_keep_dirty, v)
+				local change = _commit(v)
 				dirty = dirty or change
 			end
 		end
@@ -249,13 +251,7 @@ local function _commit(is_keep_dirty, doc, result, prefix)
 	return result or dirty
 end
 
-function tracedoc.commit(doc, result, prefix)
-	return _commit(false, doc, result, prefix)
-end
-
-function tracedoc.get_changes(doc, result, prefix)
-	return _commit(true, doc, result, prefix)
-end
+tracedoc.commit = _commit
 
 function tracedoc.ignore(doc, enable)
 	rawset(doc, "_ignore", enable)	-- ignore it during commit when enable
@@ -271,10 +267,8 @@ function tracedoc.opaque(doc, enable)
 end
 
 function tracedoc.mark_changed(doc, k)
-	local v = doc[k]
-	assert(not tracedoc.check_type(v), "do not mark a tracedoc as changed!")
-
-	doc_change_value(doc, k, v, true)
+	if doc._changed_keys[k] then return end
+	doc_change_value(doc, k, doc[k], true)
 end
 
 ----- change set
@@ -300,63 +294,44 @@ local function genkey(keys, key)
 	keys[key] = assert(load(code:format(path)))()
 end
 
-local function insert_tag(tags, tag, item, n)
-	local v = { table.unpack(item, n, table_len(item)) }
-	local t = tags[tag]
-	if not t then
-		tags[tag] = { v }
-	else
-		table.insert(t, v)
-	end
-	return v
-end
-
 function tracedoc.changeset(map)
 	local set = {
-		watching_n = 0,
-		watching = {},
+		watching = { n = 0 },
 		root_watching = {},
 		mapping = {},
 		keys = {},
-		tags = {},
+		map = map,
 	}
-	for _,v in ipairs(map) do
-		for i, k in ipairs(v) do
-			if type(k) == "string" then
-				v[i] = buildkey(k)
-			end
+	for _, v in ipairs(map) do
+		assert(type(v[1]) == "function")
+		local n = table_len(v)
+		v.n = n
+		for i = 2, n do
+			v[i] = buildkey(v[i])
 		end
 		
-		local tag = v[1]
-		if type(tag) == "string" then
-			v = insert_tag(set.tags, tag, v, 2)
-		else
-			v = insert_tag(set.tags, "", v, 1)
-		end
-
-		local n = table_len(v)
-		assert(n >= 1 and type(v[1]) == "function")
 		if n == 1 then
 			local f = v[1]
 			table.insert(set.root_watching, f)
 		elseif n == 2 then
+			local watching = set.watching
 			local f = v[1]
 			local k = v[2]
-			local tq = type(set.watching[k])
+			local tq = type(watching[k])
 			genkey(set.keys, k)
 			if tq == "nil" then
-				set.watching[k] = f
-				set.watching_n = set.watching_n + 1
+				watching[k] = f
+				watching.n = watching.n + 1
 			elseif tq == "function" then
-				local q = { set.watching[k], f }
-				set.watching[k] = q
+				local q = { watching[k], f }
+				watching[k] = q
 			else
 				assert (tq == "table")
-				table.insert(set.watching[k], f)
+				table.insert(watching[k], f)
 			end
 		else
-			table.insert(set.mapping, { table.unpack(v) })
-			for i = 2, table_len(v) do
+			table.insert(set.mapping, v)
+			for i = 2, n do
 				genkey(set.keys, v[i])
 			end
 		end
@@ -377,8 +352,11 @@ local function do_funcs(doc, funcs, v)
 	end
 end
 
-local function do_mapping(doc, mapping, changes, keys, args)
-	local n = table_len(mapping)
+local argv = setmetatable({}, {__mode = "v"})
+local function do_mapping(doc, mapping, changes, keys)
+	local NULL, argv = NULL, argv
+	local n = mapping.n
+	argv[1] = doc
 	for i=2,n do
 		local key = mapping[i]
 		local v = changes[key]
@@ -387,23 +365,21 @@ local function do_mapping(doc, mapping, changes, keys, args)
 		elseif v == NULL then
 			v = nil
 		end
-		args[i-1] = v
+		argv[i] = v
 	end
-	mapping[1](doc, table.unpack(args,1,n-1))
+	mapping[1](unpack(argv, 1, n))
 end
 
-local function _mapchange(doc, set, c, skip_commit)
+function tracedoc.mapchange(doc, set, c)
 	local changes = c or {}
-	if not skip_commit then
-		changes = tracedoc.commit(doc, changes)
-	end
 	local changes_n = changes._n or 0
 	if changes_n == 0 then
 		return changes
 	end
-	if changes_n > set.watching_n then
+	local watching = set.watching
+	if changes_n > watching.n then
 		-- a lot of changes
-		for key, funcs in pairs(set.watching) do
+		for key, funcs in pairs(watching) do
 			local v = changes[key]
 			if v ~= nil then
 				do_funcs(doc, funcs, v)
@@ -411,9 +387,8 @@ local function _mapchange(doc, set, c, skip_commit)
 		end
 	else
 		-- a lot of watching funcs
-		local watching_func = set.watching
 		for key, v in pairs(changes) do
-			local funcs = watching_func[key]
+			local funcs = watching[key]
 			if funcs then
 				do_funcs(doc, funcs, v)
 			end
@@ -421,12 +396,11 @@ local function _mapchange(doc, set, c, skip_commit)
 	end
 	-- mapping
 	local keys = set.keys
-	local tmp = {}
 	for _, mapping in ipairs(set.mapping) do
 		for i=2,table_len(mapping) do
 			local key = mapping[i]
 			if changes[key] ~= nil then
-				do_mapping(doc, mapping, changes, keys, tmp)
+				do_mapping(doc, mapping, changes, keys)
 				break
 			end
 		end
@@ -436,36 +410,20 @@ local function _mapchange(doc, set, c, skip_commit)
 	return changes
 end
 
-function tracedoc.mapchange(doc, set, c)
-	return _mapchange(doc, set, c)
-end
-
-function tracedoc.mapchange_without_commit(doc, set, changes)
-	return _mapchange(doc, set, changes, true)
-end
-
-function tracedoc.mapupdate(doc, set, filter_tag)
-	local args = {}
+function tracedoc.mapupdate(doc, set, ...)
+	local argc, argv = select('#', ...), {doc, ...}
 	local keys = set.keys
-	for tag, items in pairs(set.tags) do
-		if tag == filter_tag or filter_tag == nil then
-			for _, mapping in ipairs(items) do
-				local n = table_len(mapping)
-				for i=2,n do
-					local key = mapping[i]
-					local v = keys[key](doc)
-					args[i-1] = v
-				end
-				mapping[1](doc, table.unpack(args,1,n-1))
-			end
+	for _, v in ipairs(set.map) do
+		local n = v.n
+		for i = 2, n do
+			argv[argc + i] = keys[v[i]](doc)
 		end
+		v[1](unpack(argv, 1, argc + n))
 	end
 end
 
 function tracedoc.check_type(doc)
-	if type(doc) ~= "table" then return false end
-	local mt = getmetatable(doc)
-	return mt == tracedoc_type
+	return getmetatable(doc) == tracedoc_type
 end
 
 return tracedoc

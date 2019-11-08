@@ -165,24 +165,6 @@ describe("basic tests", function()
         assert.are.equal(tracedoc.len(changes.pet), 0)
     end)
 
-    test("support get_changes() which get changes with keeping a doc dirty", function()
-        tracedoc.commit(doc)
-
-        doc.hp = doc.hp + 20
-        doc.level = 11
-
-        local changes1 = tracedoc.get_changes(doc, {})
-        local changes2 = tracedoc.get_changes(doc, {})
-        assert.are.same(changes1, changes2)
-
-        local changes3 = tracedoc.commit(doc, {})
-        assert.are.same(changes3, changes2)
-
-        local changes4 = tracedoc.get_changes(doc, {})
-        assert.are.same(changes4, {})
-        assert.are_not.same(changes4, changes1)
-    end)
-
     test("opaque table", function()
         tracedoc.opaque(doc.pet, true)
         local changes = tracedoc.commit(doc, {})

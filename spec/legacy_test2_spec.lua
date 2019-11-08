@@ -31,12 +31,12 @@ describe("original test2.lua from cloudwu/tracedoc", function()
         end
 
         local mapping = tracedoc.changeset {
-            { "A" , map "A1" , "a" },
-            { "A" , map "A2" , "a" },
-            { "B" , map "B", "b" },
-            { "B" , map "BX" , "b.x" },
+            { map "A1" , "a" },
+            { map "A2" , "a" },
+            { map "B", "b" },
+            { map "BX" , "b.x" },
             { add_b, "b.x", "b.y" },
-            { "C", add_c, "c" },
+            { add_c, "c" },
         }
 
         local function map(info)
@@ -59,14 +59,6 @@ describe("original test2.lua from cloudwu/tracedoc", function()
         doc.b.y = 4
 
         map(3)
-
-        print("Filter A")
-        tracedoc.mapupdate(doc, mapping, "A")
-        print("Filter B")
-        tracedoc.mapupdate(doc, mapping, "B")
-        print("Filter null")
-        tracedoc.mapupdate(doc, mapping, "")
-        print("Filter All")
         tracedoc.mapupdate(doc, mapping)
     end)
 end)
